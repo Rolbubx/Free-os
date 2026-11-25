@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  FreeOS local manifest, applied on top of the AOSP manifest
+  (copied to .repo/local_manifests/ by ci/aosp/build.sh).
+
+  Examples:
+    Drop a project you don't need:
+      <remove-project name="platform/packages/apps/Example" />
+    Add your own repo (e.g. FreeOS apps/overlays):
+      <remote name="freeos" fetch="https://github.com/Rolbubx" />
+      <project name="freeos_vendor" path="vendor/freeos" remote="freeos" revision="main" />
+-->
+<manifest>
+</manifest>

@@ -1,0 +1,92 @@
+name: Build FreeOS (AOSP Android TV)
+
+# Builds run on a self-hosted runner living on a GCP VM that this workflow
+# starts before the build and stops afterwards, so you only pay while building.
+# One-time setup: see ci/gcp/setup.sh and the "CI build" section of README.md.
+#
+# Deliberately NO pull_request trigger: code from forks must never run on the
+# self-hosted runner.
+
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: Build variant
+        type: choice
+        options: [userdebug, eng, user]
+        default: userdebug
+      clean:
+        description: Delete out/ before building (full rebuild)
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - manifests/**
+      - ci/aosp/**
+      - .github/workflows/build.yml
+
+concurrency:
+  group: aosp-build
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  GCP_PROJECT: ${{ vars.GCP_PROJECT }}
+  GCP_ZONE: ${{ vars.GCP_ZONE }}
+  GCP_VM_NAME: ${{ vars.GCP_VM_NAME }}
+
+jobs:
+  start-vm:
+    # Skipped until the GCP repository variables exist (see README).
+    if: vars.GCP_VM_NAME != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_EMAIL }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Start build VM
+        run: gcloud compute instances start "$GCP_VM_NAME" --zone "$GCP_ZONE" --project "$GCP_PROJECT"
+
+  build:
+    needs: start-vm
+    runs-on: [self-hosted, linux, freeos-aosp]
+    timeout-minutes: 1200
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sync and build AOSP
+        env:
+          LUNCH_VARIANT: ${{ inputs.variant || 'userdebug' }}
+          FREEOS_CLEAN: ${{ inputs.clean && '1' || '0' }}
+        run: bash ci/aosp/build.sh
+      - uses: actions/upload-artifact@v4
+        if: always()   # keep build.log.gz from failed builds too
+        with:
+          name: freeos-${{ github.run_number }}
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  stop-vm:
+    needs: [start-vm, build]
+    if: always() && needs.start-vm.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_EMAIL }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Stop build VM
+        run: gcloud compute instances stop "$GCP_VM_NAME" --zone "$GCP_ZONE" --project "$GCP_PROJECT"
